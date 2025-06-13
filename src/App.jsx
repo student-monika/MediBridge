@@ -5,6 +5,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Login from './components/auth/Login';
 import Signup from './components/auth/Signup';
 import Dashboard from './components/Dashboard';
+import AddDonation from './components/AddDonation';
 import BrowseSupplies from './components/supplies/BrowseSupplies';
 
 function App() {
@@ -13,18 +14,37 @@ function App() {
       <AuthProvider>
         <div className="App">
           <Routes>
+            {/* Public Routes */}
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
-            <Route path="/dashboard" element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            } />
-            <Route path="/supplies" element={
-              <ProtectedRoute>
-                <BrowseSupplies />
-              </ProtectedRoute>
-            } />
+            
+            {/* Protected Routes */}
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/add-donation"
+              element={
+                <ProtectedRoute>
+                  <AddDonation />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/supplies"
+              element={
+                <ProtectedRoute>
+                  <BrowseSupplies />
+                </ProtectedRoute>
+              }
+            />
+            
+            {/* Default Route */}
             <Route path="/" element={<Navigate to="/dashboard" />} />
           </Routes>
         </div>
