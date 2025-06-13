@@ -5,8 +5,8 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Login from './components/auth/Login';
 import Signup from './components/auth/Signup';
 import Dashboard from './components/Dashboard';
-import AddDonation from './components/AddDonation'; 
-
+import AddDonation from './components/AddDonation';
+import BrowseSupplies from './components/supplies/BrowseSupplies';
 
 function App() {
   return (
@@ -17,7 +17,7 @@ function App() {
             {/* Public Routes */}
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
-
+            
             {/* Protected Routes */}
             <Route
               path="/dashboard"
@@ -35,7 +35,15 @@ function App() {
                 </ProtectedRoute>
               }
             />
-
+            <Route
+              path="/supplies"
+              element={
+                <ProtectedRoute>
+                  <BrowseSupplies />
+                </ProtectedRoute>
+              }
+            />
+            
             {/* Default Route */}
             <Route path="/" element={<Navigate to="/dashboard" />} />
           </Routes>
