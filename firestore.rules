@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Supplies collection
+    match /supplies/{supplyId} {
+      // Anyone can read available supplies
+      allow read: if resource.data.status == 'available';
+      
+      // Only authenticated users can create supplies
+      allow create: if request.auth != null &&
+                      request.auth.uid == request.resource.data.donorId;
+      
+      // Only the donor can update their own supplies
+      allow update: if request.auth != null && 
+                      request.auth.uid == resource.data.donorId;
+      
+      // Only the donor can delete their own supplies
+      allow delete: if request.auth != null && 
+                      request.auth.uid == resource.data.donorId;
+    }
+    
+    // Requests collection
+    match /requests/{requestId} {
+      // Users can read their own requests (as donor or receiver)
+      allow read: if request.auth != null && 
+                    (request.auth.uid == resource.data.receiverId || 
+                     request.auth.uid == resource.data.donorId);
+      
+      // Authenticated users can create requests
+      allow create: if request.auth != null && 
+                      request.auth.uid == request.resource.data.receiverId;
+      
+      // Both donor and receiver can update (for status changes)
+      allow update: if request.auth != null && 
+                      (request.auth.uid == resource.data.receiverId || 
+                       request.auth.uid == resource.data.donorId);
+      
+      // Only receiver can delete their own requests
+      allow delete: if request.auth != null && 
+                      request.auth.uid == resource.data.receiverId;
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      // Users can read and write their own data
+      allow read, write: if request.auth != null && 
+                           request.auth.uid == userId;
+      
+      // Allow reading basic user info for public profiles
+      allow read: if request.auth != null;
+    }
+  }
+}

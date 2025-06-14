@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Calendar, MapPin, Package, Plus, User, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { suppliesService } from '../services/firebase'; // Import the service
 
 export default function AddDonation() {
   const [formData, setFormData] = useState({
@@ -14,20 +15,21 @@ export default function AddDonation() {
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-
+  const [error, setError] = useState('');
 
   // Mock user data - would come from auth context in real app
   const currentUser = {
+    id: 'user123', // This should come from your auth system
     name: 'Dr. Sarah Johnson',
     email: 'sarah.johnson@cityhospital.com'
   };
 
   const categories = [
-    'All', 
     'Medication', 
     'Medical Equipment', 
     'Surgical Supplies', 
-    'Diagnostic Equipment'
+    'Diagnostic Equipment',
+    'PPE'
   ];
 
   const handleInputChange = (e) => {
@@ -36,20 +38,42 @@ export default function AddDonation() {
       ...prev,
       [name]: value
     }));
+    // Clear error when user starts typing
+    if (error) setError('');
   };
+
   const handleDashboardClick = () => {
-    // Navigate to dashboard
     window.location.href = '/dashboard';
-    // Alternative: navigate('/dashboard');
-    };
+  };
 
   const handleSubmit = async (e) => {
+    e.preventDefault();
     setIsSubmitting(true);
+    setError('');
     
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      // Prepare data for Firebase
+      const supplyData = {
+        itemName: formData.itemName,
+        category: formData.category,
+        quantity: formData.quantity,
+        expiryDate: formData.expiryDate, // Store as string, you might want to convert to Date
+        pickupLocation: formData.pickupLocation,
+        notes: formData.notes,
+        // Additional fields for the database
+        donorId: currentUser.id,
+        donorName: currentUser.name,
+        donorEmail: currentUser.email,
+        status: 'available'
+      };
+
+      // Save to Firebase
+      const docId = await suppliesService.addSupply(supplyData);
+      console.log('Supply added with ID:', docId);
+      
       setIsSubmitting(false);
       setShowSuccess(true);
+      
       // Reset form after successful submission
       setFormData({
         itemName: '',
@@ -59,7 +83,11 @@ export default function AddDonation() {
         pickupLocation: '',
         notes: ''
       });
-    }, 2000);
+    } catch (error) {
+      console.error('Error adding donation:', error);
+      setError('Failed to add donation. Please try again.');
+      setIsSubmitting(false);
+    }
   };
 
   const isFormValid = formData.itemName && formData.category && formData.quantity && 
@@ -84,7 +112,10 @@ export default function AddDonation() {
               >
                 Add Another Donation
               </button>
-              <button className="w-full bg-gray-100 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-200 transition-colors">
+              <button 
+                onClick={() => window.location.href = '/my-donations'}
+                className="w-full bg-gray-100 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-200 transition-colors"
+              >
                 View My Donations
               </button>
             </div>
@@ -108,7 +139,7 @@ export default function AddDonation() {
                         className="hover:text-blue-600 transition-colors cursor-pointer"
                     >
                         Dashboard
-                    </button>
+                    </button>
               </button>
             </div>
             <div className="flex items-center space-x-3">
@@ -130,7 +161,13 @@ export default function AddDonation() {
           {/* Main Form */}
           <div className="lg:col-span-2">
             <div className="bg-white rounded-xl shadow-sm border p-6">
-              <div className="space-y-6">
+              {error && (
+                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-red-600 text-sm">{error}</p>
+                </div>
+              )}
+              
+              <form onSubmit={handleSubmit} className="space-y-6">
                 {/* Item Name */}
                 <div>
                   <label htmlFor="itemName" className="block text-sm font-medium text-gray-700 mb-2">
@@ -243,7 +280,7 @@ export default function AddDonation() {
                 {/* Submit Button */}
                 <div className="pt-4">
                   <button
-                    onClick={handleSubmit}
+                    type="submit"
                     disabled={!isFormValid || isSubmitting}
                     className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center space-x-2"
                   >
@@ -260,7 +297,7 @@ export default function AddDonation() {
                     )}
                   </button>
                 </div>
-              </div>
+              </form>
             </div>
           </div>
 
