@@ -42,7 +42,7 @@ const Navbar = ({ user = { name: 'John Doe', email: 'john@example.com' } }) => {
 
     const handleMyRequestsClick = () => {
         // Navigate to my requests page
-        window.location.href = '/my-requests';
+        window.location.href = '/my-request';
         // Alternative: navigate('/my-requests');
     };
 
