@@ -5,8 +5,10 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Login from './components/auth/Login';
 import Signup from './components/auth/Signup';
 import Dashboard from './components/Dashboard';
+import AddDonation from './components/AddDonation';
+import BrowseSupplies from './components/supplies/BrowseSupplies';
 import MyDonation from './components/mydonation';
-import MyRequest from './components/myrequest';  // Updated import to match your file name
+import MyRequest from './components/myrequest';
 
 function App() {
   return (
@@ -28,6 +30,22 @@ function App() {
               }
             />
             <Route
+              path="/add-donation"
+              element={
+                <ProtectedRoute>
+                  <AddDonation />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/supplies"
+              element={
+                <ProtectedRoute>
+                  <BrowseSupplies />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/my-donations"
               element={
                 <ProtectedRoute>
@@ -44,7 +62,7 @@ function App() {
               }
             />
             
-            {/* Redirect root and unknown routes */}
+            {/* Default Route */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

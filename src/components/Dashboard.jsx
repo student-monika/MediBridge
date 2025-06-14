@@ -52,18 +52,18 @@ export default function Dashboard() {
               {userRole === 'receiver' && (
                 <nav className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-6">
                   <button 
-                    onClick={() => navigate('/browse-supplies')}
+                    onClick={() => navigate('/supplies')}
                     className="flex items-center space-x-2 text-gray-700 hover:text-blue-600 transition-colors text-sm sm:text-base"
                   >
                     <Search size={16} className="sm:w-[18px] sm:h-[18px]" />
                     <span className="font-medium">Browse Supplies</span>
                   </button>
                   <button 
-                    onClick={() => navigate('/my-requests')}
+                    onClick={() => navigate('/my-request')}
                     className="flex items-center space-x-2 text-gray-700 hover:text-blue-600 transition-colors text-sm sm:text-base"
                   >
                     <ClipboardList size={16} className="sm:w-[18px] sm:h-[18px]" />
-                    <span className="font-medium">My Request</span>
+                    <span className="font-medium">My Requests</span>
                   </button>
                 </nav>
               )}
