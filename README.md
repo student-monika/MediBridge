@@ -25,7 +25,6 @@ MediBridge offers a real-time, transparent, and easy-to-use platform where:
 - 🧾 Browse Available Supplies (with filters)
 - ➕ Add New Donation (item name, quantity, expiry, location)
 - 📥 Request Items
-- ✅ Approve/Reject Requests
 - 📊 Dashboards: My Donations / My Requests
 - 🔄 Real-time Updates using Firebase
 
