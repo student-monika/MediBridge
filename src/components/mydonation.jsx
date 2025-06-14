@@ -78,14 +78,12 @@ export default function MyDonations() {
 
   const addDonation = () => {
     // In a real app, this would use React Router
-    window.location.href = '#/add-donation';
-    alert('Redirecting to Add Donation page...');
+    window.location.href = '/add-donation';
   };
 
   const goToDashboard = () => {
     // In a real app, this would use React Router
-    window.location.href = '#/dashboard';
-    alert('Redirecting to Dashboard...');
+    window.location.href = '/dashboard';
   };
 
   const acceptRequest = (donation) => {

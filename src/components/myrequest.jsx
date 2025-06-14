@@ -54,13 +54,11 @@ export default function MyRequestsPage() {
   ]);
 
   const goToDashboard = () => {
-    window.location.href = '#/dashboard';
-    alert('Redirecting to Dashboard...');
+    window.location.href = '/dashboard';
   };
 
   const browseSupplies = () => {
-    window.location.href = '#/browse-supplies';
-    alert('Redirecting to Browse Supplies...');
+    window.location.href = '/supplies';
   };
 
   const cancelRequest = (request) => {
