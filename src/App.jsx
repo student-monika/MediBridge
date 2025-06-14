@@ -7,6 +7,8 @@ import Signup from './components/auth/Signup';
 import Dashboard from './components/Dashboard';
 import AddDonation from './components/AddDonation';
 import BrowseSupplies from './components/supplies/BrowseSupplies';
+import MyDonation from './components/mydonation';
+import MyRequest from './components/myrequest';
 
 function App() {
   return (
@@ -43,9 +45,26 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/my-donations"
+              element={
+                <ProtectedRoute>
+                  <MyDonation />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/my-request"
+              element={
+                <ProtectedRoute>
+                  <MyRequest />
+                </ProtectedRoute>
+              }
+            />
             
             {/* Default Route */}
-            <Route path="/" element={<Navigate to="/dashboard" />} />
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </div>
       </AuthProvider>
