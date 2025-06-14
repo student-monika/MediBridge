@@ -1,12 +1,43 @@
-# React + Vite
+# 🏥 MediBridge
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**MediBridge** is a donation-based web platform designed to connect donors (clinics, hospitals, pharmacies) with receivers (rural clinics, NGOs) for redistributing surplus medical supplies before they expire. The goal is to reduce medical waste and improve access to essential healthcare resources in under-resourced areas.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## 📌 Problem Statement
 
-## Expanding the ESLint configuration
+Every year, tons of usable medical supplies are discarded due to expiry or overstock, while many rural or underserved areas face critical shortages. There's no centralized system to match surplus with demand in real time.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+---
+
+## 💡 Solution
+
+MediBridge offers a real-time, transparent, and easy-to-use platform where:
+- **Donors** can list surplus supplies with expiry dates and quantities.
+- **Receivers** can browse, request, and receive approved items.
+- Both parties can track the donation journey with status updates and contact details.
+
+---
+
+## 🚀 Features
+
+- 🔐 User Authentication (Donor & Receiver roles)
+- 🧾 Browse Available Supplies (with filters)
+- ➕ Add New Donation (item name, quantity, expiry, location)
+- 📥 Request Items
+- ✅ Approve/Reject Requests
+- 📊 Dashboards: My Donations / My Requests
+- 🔄 Real-time Updates using Firebase
+
+---
+
+## 🛠️ Tech Stack
+
+### Frontend:
+- React.js
+- Tailwind CSS
+- React Router
+
+### Backend & Auth:
+- Firebase Firestore (Database)
+- Firebase Auth (Authentication)
