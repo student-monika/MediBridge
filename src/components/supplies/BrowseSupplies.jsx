@@ -8,13 +8,14 @@ import SupplyFilters from './SupplyFilters';
 import SupplyCard from './SupplyCard';
 import SupplyDetails from './SupplyDetails';
 
-// Import services - Firebase usage
-import { suppliesService, requestsService, notificationService} from '../../services/firebase';
+// Import services - Removed 'notificationService' import
+import { suppliesService, requestsService } from '../../services/firebase';
 
-// Import mock data as fallback
-import { mockUser } from '../../utils/mockData';
+// Import AuthContext to get the real user - Removed 'mockUser' import
+import { useAuth } from '../../contexts/AuthContext'; 
 
 const BrowseSupplies = () => {
+  const { currentUser, userRole } = useAuth();
   const [supplies, setSupplies] = useState([]);
   const [filteredSupplies, setFilteredSupplies] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -27,6 +28,9 @@ const BrowseSupplies = () => {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  const isReceiver = userRole === 'receiver';
+  const currentUserId = currentUser?.uid;
 
   // Load supplies and requests on component mount
   useEffect(() => {
@@ -41,14 +45,10 @@ const BrowseSupplies = () => {
         // Set up real-time listener for ALL available supplies from ANY donor
         suppliesUnsubscribe = suppliesService.onSuppliesChange((suppliesData) => {
           console.log('All available supplies updated:', suppliesData);
-          // Ensure each supply has proper ID and normalized data
           const normalizedSupplies = suppliesData.map(supply => ({
             ...supply,
-            // Ensure ID is present
             id: supply.id,
-            // Normalize name field
             name: supply.name || supply.itemName || 'Unnamed Supply',
-            // Ensure other required fields exist
             category: supply.category || 'Uncategorized',
             quantity: supply.quantity || 'N/A',
             unit: supply.unit || 'units',
@@ -61,9 +61,9 @@ const BrowseSupplies = () => {
           setLoading(false);
         });
 
-        // Set up real-time listener for current user's requests
-        if (mockUser && mockUser.id) {
-          requestsUnsubscribe = requestsService.onReceiverRequestsChange(mockUser.id, (requestsData) => {
+        // Set up real-time listener for current user's requests, ONLY IF they are a receiver
+        if (currentUserId && isReceiver) {
+          requestsUnsubscribe = requestsService.onReceiverRequestsChange(currentUserId, (requestsData) => {
             console.log('User requests updated:', requestsData);
             setRequests(requestsData);
           });
@@ -87,7 +87,7 @@ const BrowseSupplies = () => {
         requestsUnsubscribe();
       }
     };
-  }, []);
+  }, [currentUser, isReceiver, currentUserId]);
 
   // Filter supplies based on search and filters
   useEffect(() => {
@@ -126,7 +126,7 @@ const BrowseSupplies = () => {
     // Apply expiry filter
     if (filters.expiry !== 'All') {
       filtered = filtered.filter(supply => {
-        if (!supply.expiryDate) return true; // Include items without expiry date
+        if (!supply.expiryDate) return true; 
         
         const expiryDate = new Date(supply.expiryDate);
         const today = new Date();
@@ -171,17 +171,14 @@ const BrowseSupplies = () => {
   const handleViewDetails = (supply) => {
     console.log('Viewing details for supply:', supply);
     
-    // Validate supply object
     if (!supply || !supply.id) {
       console.error('Invalid supply object:', supply);
       alert('Error: Supply data is invalid. Please refresh the page.');
       return;
     }
 
-    // Set the selected supply with all necessary data
     setSelectedSupply({
       ...supply,
-      // Ensure all required fields are present
       id: supply.id,
       name: supply.name || supply.itemName || 'Unnamed Supply',
       category: supply.category || 'Uncategorized',
@@ -196,16 +193,21 @@ const BrowseSupplies = () => {
 const handleRequestItem = async (supply) => {
   console.log('Requesting item:', supply);
   
-  // Validate supply object
   if (!supply || !supply.id) {
     console.error('Invalid supply object for request:', supply);
     alert('Error: Supply data is invalid. Please refresh the page.');
     return;
   }
 
-  // Check if user is logged in
-  if (!mockUser || !mockUser.id) {
+  // Use currentUserId instead of mockUser.id
+  if (!currentUser || !currentUser.uid) {
     alert('Please log in to make a request.');
+    return;
+  }
+  
+  // Role check
+  if (userRole !== 'receiver') {
+    alert('Only users with the Receiver role can request supplies.');
     return;
   }
 
@@ -223,10 +225,10 @@ const handleRequestItem = async (supply) => {
   try {
     const requestData = {
       supplyId: supply.id,
-      receiverId: mockUser.id,
-      receiverName: mockUser.name,
-      receiverEmail: mockUser.email,
-      receiverPhone: mockUser.phone || '',
+      receiverId: currentUser.uid, 
+      receiverName: currentUser.displayName || 'Unnamed Receiver', 
+      receiverEmail: currentUser.email || 'N/A', 
+      receiverPhone: '', 
       donorId: supply.donorId,
       donorName: supply.donorName || 'Anonymous Donor',
       supplyName: supply.name || supply.itemName || 'Unnamed Supply',
@@ -237,7 +239,7 @@ const handleRequestItem = async (supply) => {
       expiryDate: supply.expiryDate,
       requestMessage: `Request for ${supply.name || supply.itemName || 'Unnamed Supply'} - ${supply.quantity || 'N/A'} ${supply.unit || 'units'}`,
       priority: 'normal',
-      isRead: false // ADD THIS FIELD
+      isRead: false
     };
 
     console.log('Creating request with data:', requestData);
@@ -246,17 +248,7 @@ const handleRequestItem = async (supply) => {
     const requestId = await requestsService.createRequest(requestData);
     console.log('Request created with ID:', requestId);
     
-    // CREATE NOTIFICATION FOR DONOR
-    try {
-      await notificationService.createRequestNotification(supply.donorId, {
-        id: requestId,
-        ...requestData
-      });
-      console.log('Notification sent to donor');
-    } catch (notificationError) {
-      console.error('Error sending notification:', notificationError);
-      // Don't fail the whole request if notification fails
-    }
+    // REMOVED: notificationService.createRequestNotification call block.
     
     // Show success message
     alert(`Request submitted successfully! Request ID: ${requestId}\nThe donor will be notified and you'll receive updates on your request status.`);
@@ -344,7 +336,6 @@ const handleRequestItem = async (supply) => {
         <div className="mb-6">
           <SupplySearch
             searchTerm={searchTerm}
-            onSearchChange={setSearchTerm}
           />
         </div>
         

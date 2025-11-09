@@ -1,91 +1,70 @@
 import React, { useState, useEffect } from 'react';
-import { suppliesService } from '../services/firebase'; // Import the service
+import { useAuth } from '../contexts/AuthContext';
+import { suppliesService, requestsService } from '../services/firebase'; 
+import { Package, Plus, ClipboardList, CheckCircle, XCircle, Clock, Loader } from 'lucide-react';
 
 export default function MyDonations() {
-  const [donations, setDonations] = useState([]);
+  const { currentUser, userRole } = useAuth();
+  const [requests, setRequests] = useState([]); // Stores incoming requests
   const [loading, setLoading] = useState(true);
+  // FIX 1: Change default active tab to 'all' for better visibility
+  const [activeTab, setActiveTab] = useState('all'); 
   const [error, setError] = useState('');
+  const [supplyMap, setSupplyMap] = useState({}); 
 
-  // Mock user data - should come from auth context in real app
-  const currentUser = {
-    id: 'user123', // This should match the donorId used in AddDonation
-    name: 'Dr. Sarah Johnson',
-    email: 'sarah.johnson@cityhospital.com'
-  };
+  const currentDonor = currentUser ? {
+    id: currentUser.uid,
+    name: currentUser.displayName,
+    email: currentUser.email
+  } : null;
+  const currentDonorId = currentDonor?.id;
 
-  // Fetch donations on component mount
+
+  // 1. Fetch Requests targeted at this Donor
   useEffect(() => {
-    const fetchDonations = async () => {
-      try {
-        setLoading(true);
-        setError(''); // Clear any previous errors
-        
-        console.log('Fetching donations for user:', currentUser.id); // Debug log
-        
-        // Check if suppliesService and the method exist
-        if (!suppliesService || !suppliesService.getDonorSupplies) {
-          throw new Error('suppliesService.getDonorSupplies is not available');
-        }
-        
-        // Use the new getDonorSupplies function to get ALL user donations regardless of status
-        const userDonations = await suppliesService.getDonorSupplies(currentUser.id);
-        
-        console.log('Fetched donations:', userDonations); // Debug log
-        
-        // Ensure userDonations is an array
-        if (!Array.isArray(userDonations)) {
-          console.warn('userDonations is not an array:', userDonations);
-          setDonations([]);
-        } else {
-          setDonations(userDonations);
-        }
-      } catch (error) {
-        console.error('Error fetching donations:', error);
-        console.error('Error details:', {
-          message: error.message,
-          stack: error.stack,
-          code: error.code
-        });
-        setError(`Failed to load donations: ${error.message}`);
-        setDonations([]); // Set empty array on error
-      } finally {
+    if (currentUser === undefined) return;
+    if (!currentDonorId || userRole !== 'donor') {
+      if (currentUser !== null) {
+        setError('Access Denied. Please log in as a Donor to view this page.');
         setLoading(false);
       }
-    };
-
-    fetchDonations();
-
-    // Set up real-time listener for the current user's donations
-    let unsubscribe = null;
-    
-    try {
-      // Check if the real-time listener method exists
-      if (suppliesService && suppliesService.onDonorSuppliesChange) {
-        unsubscribe = suppliesService.onDonorSuppliesChange(currentUser.id, (userDonations) => {
-          console.log('Real-time update received:', userDonations); // Debug log
-          
-          if (Array.isArray(userDonations)) {
-            setDonations(userDonations);
-          } else {
-            console.warn('Real-time userDonations is not an array:', userDonations);
-            setDonations([]);
-          }
-          setLoading(false);
-        });
-      } else {
-        console.warn('Real-time listener not available');
-      }
-    } catch (error) {
-      console.error('Error setting up real-time listener:', error);
+      return;
     }
+
+    // Set up real-time listener for requests made TO this donor
+    const unsubscribeRequests = requestsService.onDonorRequestsChange(currentDonorId, (requestsData) => {
+      setRequests(requestsData);
+      setLoading(false);
+    });
 
     // Cleanup listener on unmount
     return () => {
-      if (unsubscribe && typeof unsubscribe === 'function') {
-        unsubscribe();
+      if (unsubscribeRequests) {
+        unsubscribeRequests();
       }
     };
-  }, [currentUser.id]);
+  }, [currentDonorId, currentUser, userRole]);
+
+  // 2. Fetch all related Supplies (for status/contact info) when requests change
+  useEffect(() => {
+      const fetchAllSupplies = async () => {
+        if (requests.length === 0) return;
+
+        const supplyIds = [...new Set(requests.map(req => req.supplyId))];
+        const newSupplyMap = {};
+
+        for (const id of supplyIds) {
+            const supplyData = await requestsService.getSupplyById(id);
+            if(supplyData) {
+                newSupplyMap[id] = supplyData;
+            }
+        }
+        setSupplyMap(prev => ({...prev, ...newSupplyMap}));
+      };
+
+      fetchAllSupplies();
+  }, [requests]);
+
 
   const addDonation = () => {
     window.location.href = '/add-donation';
@@ -95,175 +74,135 @@ export default function MyDonations() {
     window.location.href = '/dashboard';
   };
 
-  const acceptRequest = async (donation) => {
-    if (window.confirm(`Accept request for ${donation.itemName}?`)) {
+  // Response handler for Accept/Reject/Collected
+  const handleResponse = async (request, status, message = '') => {
+    if (window.confirm(`Are you sure you want to ${status} this request for ${request.supplyName}?`)) {
       try {
-        await suppliesService.updateSupplyStatus(donation.id, 'accepted');
-        alert(`Request accepted for ${donation.itemName}!`);
+        setLoading(true);
+        // Use the service function to update request and supply status
+        await requestsService.respondToRequest(request.id, request.supplyId, status, message);
+        alert(`Request ${status} successfully.`);
       } catch (error) {
-        console.error('Error accepting request:', error);
-        alert('Failed to accept request. Please try again.');
+        console.error(`Error ${status} request:`, error);
+        alert(`Failed to ${status} request. Please try again.`);
+      } finally {
+        setLoading(false);
       }
     }
   };
-
-  const editItem = (itemName) => {
-    alert(`Edit functionality for ${itemName} - To be implemented`);
-  };
-
-  const deleteItem = async (donation) => {
-    if (window.confirm(`Delete ${donation.itemName}?`)) {
-      try {
-        await suppliesService.deleteSupply(donation.id);
-        alert(`${donation.itemName} deleted successfully`);
-      } catch (error) {
-        console.error('Error deleting donation:', error);
-        alert('Failed to delete donation. Please try again.');
+  
+  const handleCollected = (request) => {
+      if (window.confirm(`Mark ${request.supplyName} as COLLECTED/COMPLETED? This will mark the item as collected and close the loop.`)) {
+          handleResponse(request, 'collected', 'The supply has been successfully collected and the request is now marked as complete.');
       }
-    }
-  };
+  }
 
   const getStatusStyle = (status) => {
     switch (status) {
-      case 'available':
+      case 'approved':
         return 'bg-green-100 text-green-800';
-      case 'requested':
+      case 'pending':
         return 'bg-yellow-100 text-yellow-800';
+      case 'rejected':
+        return 'bg-red-100 text-red-800';
       case 'collected':
-      case 'accepted':
         return 'bg-blue-100 text-blue-800';
+      case 'cancelled':
+        return 'bg-gray-100 text-gray-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
   };
 
-  const getStatusDot = (status) => {
+  const getStatusIcon = (status) => {
     switch (status) {
-      case 'available':
-        return 'bg-green-500';
-      case 'requested':
-        return 'bg-yellow-500';
+      case 'approved':
+        return <CheckCircle className="h-4 w-4 text-green-600" />;
+      case 'pending':
+        return <Clock className="h-4 w-4 text-yellow-600" />;
+      case 'rejected':
+        return <XCircle className="h-4 w-4 text-red-600" />;
       case 'collected':
-      case 'accepted':
-        return 'bg-blue-500';
+        return <Package className="h-4 w-4 text-blue-600" />;
+      case 'cancelled':
+        return <XCircle className="h-4 w-4 text-gray-600" />;
       default:
-        return 'bg-gray-500';
+        return <Clock className="h-4 w-4 text-gray-600" />;
     }
   };
 
   const getCategoryStyle = (category) => {
-    switch (category) {
-      case 'PPE':
-        return 'bg-yellow-100 text-yellow-800';
-      case 'Medical Equipment':
-      case 'Medical Devices':
-        return 'bg-blue-100 text-blue-800';
-      case 'Medication':
-        return 'bg-purple-100 text-purple-800';
-      case 'Surgical Supplies':
-        return 'bg-green-100 text-green-800';
-      case 'Diagnostic Equipment':
-        return 'bg-indigo-100 text-indigo-800';
-      default:
-        return 'bg-gray-100 text-gray-800';
-    }
+    const categoryColors = {
+      'Medication': 'bg-purple-100 text-purple-800',
+      'PPE': 'bg-yellow-100 text-yellow-800',
+      'Medical Equipment': 'bg-green-100 text-green-800',
+      'Surgical Supplies': 'bg-indigo-100 text-indigo-800',
+      'Diagnostic Equipment': 'bg-pink-100 text-pink-800',
+      'Other': 'bg-gray-100 text-gray-800',
+    };
+    return categoryColors[category] || 'bg-gray-100 text-gray-800';
   };
+
 
   const formatDate = (date) => {
     if (!date) return 'N/A';
-    if (typeof date === 'string') {
-      // If it's a date string (YYYY-MM-DD), format it nicely
-      const dateObj = new Date(date);
-      return dateObj.toLocaleDateString('en-GB', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      });
-    }
     if (date.toDate) {
-      // If it's a Firestore timestamp
-      return date.toDate().toLocaleDateString('en-GB', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      });
+      date = date.toDate();
     }
-    if (date instanceof Date) {
-      return date.toLocaleDateString('en-GB', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      });
-    }
-    return 'N/A';
-  };
-
-  const getStatusDisplayText = (status) => {
-    switch (status) {
-      case 'available':
-        return 'Available';
-      case 'requested':
-        return 'Requested';
-      case 'accepted':
-        return 'Accepted';
-      case 'collected':
-        return 'Collected';
-      default:
-        return status;
+    try {
+        return new Date(date).toLocaleDateString('en-GB', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric'
+        });
+    } catch (e) {
+        return 'Invalid Date';
     }
   };
 
-  if (loading) {
+  const filteredRequests = requests.filter(req => {
+    if (activeTab === 'all') return true;
+    return req.status === activeTab;
+  });
+  
+  const requestStats = {
+      all: requests.length,
+      pending: requests.filter(r => r.status === 'pending').length,
+      approved: requests.filter(r => r.status === 'approved').length,
+      rejected: requests.filter(r => r.status === 'rejected').length,
+      collected: requests.filter(r => r.status === 'collected').length,
+      cancelled: requests.filter(r => r.status === 'cancelled').length
+  };
+
+
+  if (loading && requests.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading your donations...</p>
+          <p className="text-gray-600">Loading requests for your donations...</p>
         </div>
       </div>
     );
   }
 
-  if (error) {
+  if (error || !currentDonor || userRole !== 'donor') {
+    if (currentUser === undefined) return null; // Still loading auth
+
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center max-w-md mx-auto p-6">
           <div className="text-red-500 text-6xl mb-4">⚠️</div>
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Something went wrong</h2>
-          <p className="text-red-600 mb-4 text-sm">{error}</p>
-          <div className="flex gap-2 justify-center">
-            <button 
-              onClick={() => window.location.reload()}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-            >
-              Retry
-            </button>
-            <button 
-              onClick={() => {
-                setError('');
-                setLoading(true);
-                // Retry the fetch manually
-                const retryFetch = async () => {
-                  try {
-                    const userDonations = await suppliesService.getDonorSupplies(currentUser.id);
-                    setDonations(Array.isArray(userDonations) ? userDonations : []);
-                  } catch (error) {
-                    setError(`Failed to load donations: ${error.message}`);
-                  } finally {
-                    setLoading(false);
-                  }
-                };
-                retryFetch();
-              }}
-              className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700"
-            >
-              Try Again
-            </button>
-          </div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Access Denied</h2>
+          <p className="text-red-600 mb-4 text-sm">
+            {error || 'You must be logged in as a Donor to view this page.'}
+          </p>
+          <button onClick={goToDashboard} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Go to Dashboard</button>
         </div>
       </div>
     );
   }
+
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans">
@@ -284,16 +223,15 @@ export default function MyDonations() {
               onClick={addDonation}
               className="bg-gradient-to-r from-blue-600 to-blue-500 text-white px-3 py-2 sm:px-4 sm:py-2.5 rounded-lg font-medium hover:transform hover:-translate-y-0.5 hover:shadow-lg transition-all inline-flex items-center gap-1 sm:gap-2 text-sm"
             >
-              <span>+</span>
+              <Plus size={16}/>
               <span className="hidden sm:inline">Add Donation</span>
               <span className="sm:hidden">Add</span>
             </button>
             <div className="flex items-center gap-2 px-2 py-2 sm:px-3 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
               <div className="w-8 h-8 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-medium text-sm">
-                {currentUser.name.split(' ').map(n => n[0]).join('')}
+                {currentDonor.name ? currentDonor.name.split(' ').map(n => n[0]).join('') : 'U'}
               </div>
-              <span className="hidden sm:inline text-gray-700 font-medium text-sm">{currentUser.name}</span>
-              <span className="text-gray-400 text-xs">▼</span>
+              <span className="hidden sm:inline text-gray-700 font-medium text-sm">{currentDonor.name}</span>
             </div>
           </div>
         </div>
@@ -301,105 +239,128 @@ export default function MyDonations() {
 
       {/* Header Section */}
       <header className="bg-white text-gray-900 py-3 border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row justify-between items-center gap-4">
-          <div className="text-center sm:text-left">
-            <h1 className="text-xl sm:text-2xl font-bold mb-1">My Donations</h1>
-            <p className="text-gray-500 text-sm">Track and manage your donated medical supplies</p>
-          </div>
-          <div className="bg-gray-50 border border-gray-300 px-4 py-3 rounded-lg text-center">
-            <div className="text-xs text-gray-600 mb-1">Total Donations</div>
-            <div className="text-xl font-bold text-gray-800">{donations.length}</div>
-          </div>
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <h1 className="text-xl sm:text-2xl font-bold mb-1">My Donations</h1>
+          <p className="text-gray-500 text-sm">Review requests for your donated supplies.</p>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-        {donations.length === 0 ? (
-          <div className="text-center py-12">
+        
+        {/* Stats and Tabs */}
+        <div className="mb-6 flex flex-wrap gap-2 border-b border-gray-200">
+            {Object.entries(requestStats).map(([status, count]) => (
+                <button
+                    key={status}
+                    onClick={() => setActiveTab(status)}
+                    className={`px-4 py-2 -mb-px rounded-t-lg text-sm font-medium transition-colors flex items-center gap-2 
+                        ${activeTab === status 
+                          ? 'border-b-2 border-blue-600 text-blue-600 bg-white' 
+                          : 'text-gray-600 hover:text-gray-800'}`
+                        }
+                >
+                    <ClipboardList size={16} />
+                    {status.charAt(0).toUpperCase() + status.slice(1)} ({count})
+                </button>
+            ))}
+        </div>
+
+        {requests.length === 0 ? (
+          <div className="text-center py-12 bg-white rounded-lg shadow-sm">
             <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-4xl">📦</span>
+              <span className="text-4xl">📥</span>
             </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">No donations yet</h3>
-            <p className="text-gray-600 mb-6">Start helping others by donating your surplus medical supplies.</p>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">No Requests Received Yet</h3>
+            <p className="text-gray-600 mb-6">List a donation to start receiving requests from receivers in need.</p>
             <button 
               onClick={addDonation}
-              className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+              className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors"
             >
-              Add Your First Donation
+              Add New Donation
             </button>
           </div>
+        ) : filteredRequests.length === 0 ? (
+            <div className="text-center py-12 bg-white rounded-lg shadow-sm">
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">No {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Requests</h3>
+                <p className="text-gray-600">Try checking a different status tab.</p>
+            </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {donations.map((donation) => (
-              <div key={donation.id} className="bg-white rounded-xl p-6 shadow-md hover:shadow-xl hover:-translate-y-1 transition-all border border-gray-200 min-h-80 flex flex-col">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2 leading-tight">{donation.itemName}</h3>
-                    <span className={`inline-block px-3.5 py-1.5 rounded-full text-xs font-medium ${getCategoryStyle(donation.category)}`}>
-                      {donation.category}
-                    </span>
-                  </div>
-                  <div className="flex gap-1.5">
-                    <button 
-                      className="w-8 h-8 sm:w-7 sm:h-7 bg-gray-100 hover:bg-gray-200 rounded-md flex items-center justify-center text-sm transition-colors"
-                      onClick={() => editItem(donation.itemName)}
-                      title="Edit"
-                    >
-                      ✏️
-                    </button>
-                    <button 
-                      className="w-8 h-8 sm:w-7 sm:h-7 bg-gray-100 hover:bg-gray-200 rounded-md flex items-center justify-center text-sm transition-colors"
-                      onClick={() => deleteItem(donation)}
-                      title="Delete"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                </div>
+          <div className="space-y-4">
+            {filteredRequests.map((request) => {
+                const supply = supplyMap[request.supplyId] || {};
+                const currentSupplyStatus = supply.status || 'N/A';
 
-                <div className="flex flex-col gap-2.5 mb-4 flex-grow">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500 text-sm font-medium">Quantity:</span>
-                    <span className="text-gray-900 font-semibold text-sm">{donation.quantity}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500 text-sm font-medium">Expiry Date:</span>
-                    <span className="text-gray-900 font-semibold text-sm">{formatDate(donation.expiryDate)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500 text-sm font-medium">Location:</span>
-                    <span className="text-gray-900 font-semibold text-sm">{donation.pickupLocation}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500 text-sm font-medium">Status:</span>
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${getStatusDot(donation.status)}`}></div>
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${getStatusStyle(donation.status)}`}>
-                        {getStatusDisplayText(donation.status)}
-                      </span>
+                return (
+                  <div key={request.id} className="bg-white rounded-xl p-6 shadow-md border-l-4 border-blue-500 flex justify-between items-start">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                          <h3 className="text-lg font-semibold text-gray-900">{request.supplyName}</h3>
+                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${getCategoryStyle(request.category)}`}>
+                            {request.category}
+                          </span>
+                      </div>
+                      
+                      <div className="text-sm text-gray-700 mb-3">
+                          <p className="flex items-center gap-2"><Clock size={14}/>Requested on: {formatDate(request.requestDate)}</p>
+                          <p>Requested by: <strong>{request.receiverName}</strong> ({request.receiverEmail})</p>
+                          <p>Quantity: <strong>{request.quantity} {request.unit}</strong></p>
+                          <p>Item's Current Status: <strong>{currentSupplyStatus}</strong></p>
+                      </div>
+
+                      <div className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 ${getStatusStyle(request.status)} w-fit mb-4`}>
+                          {getStatusIcon(request.status)}
+                          <span>{request.status.toUpperCase()}</span>
+                      </div>
+
+
+                      {request.status === 'pending' && (
+                        <div className="flex gap-3 mt-4">
+                            <button
+                                onClick={() => handleResponse(request, 'approved', 'Your request has been approved! Please check your My Requests page for contact details.')}
+                                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm font-medium transition-colors"
+                                disabled={loading}
+                            >
+                                Accept
+                            </button>
+                            <button
+                                onClick={() => handleResponse(request, 'rejected', 'We apologize, but this item is no longer available or suitable for donation.')}
+                                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm font-medium transition-colors"
+                                disabled={loading}
+                            >
+                                Reject
+                            </button>
+                        </div>
+                      )}
+
+                      {request.status === 'approved' && (
+                        <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                            <p className="text-sm font-medium text-green-800 mb-2">Approved - Awaiting Collection</p>
+                            <div className="text-sm text-gray-700">
+                                <p>Receiver Contact: **{request.receiverEmail}**</p>
+                                <p>This item is currently **reserved**.</p>
+                            </div>
+                            <button
+                                onClick={() => handleCollected(request)}
+                                className="mt-3 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
+                                disabled={loading}
+                            >
+                                Mark as Collected/Completed
+                            </button>
+                        </div>
+                      )}
+                      
+                      {['rejected', 'cancelled', 'collected'].includes(request.status) && (
+                        <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                            <p className="text-sm font-medium text-gray-800">Status Closed: {request.status.toUpperCase()}</p>
+                            {request.responseMessage && (
+                                <p className="text-xs text-gray-600 mt-1">Response: {request.responseMessage}</p>
+                            )}
+                        </div>
+                      )}
                     </div>
                   </div>
-                  {donation.notes && (
-                    <div className="mt-2">
-                      <span className="text-gray-500 text-sm font-medium">Notes:</span>
-                      <p className="text-gray-700 text-sm mt-1 break-words">{donation.notes}</p>
-                    </div>
-                  )}
-                </div>
-
-                {donation.status === 'requested' && (
-                  <div className="mt-auto pt-3 border-t border-gray-100">
-                    <button
-                      onClick={() => acceptRequest(donation)}
-                      className="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
-                    >
-                      Accept Request
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+            )})}
           </div>
         )}
       </main>

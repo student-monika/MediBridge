@@ -1,11 +1,90 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { LogOut, Plus, Search, Package, Users, User, ClipboardList } from 'lucide-react';
+// FIX: Added CheckCircle to the imports list
+import { LogOut, Plus, Search, Package, Users, User, ClipboardList, Loader, Clock, CheckCircle } from 'lucide-react'; 
 import { useNavigate } from 'react-router-dom';
+import { suppliesService, requestsService } from '../services/firebase'; 
 
 export default function Dashboard() {
   const { currentUser, userRole, logout } = useAuth();
   const navigate = useNavigate();
+
+  // State for stats
+  const [stats, setStats] = useState({
+    totalAvailableSupplies: 0,
+    receiverRequests: 0,
+    receiverApproved: 0,
+    donorDonations: 0,
+    donorPendingRequests: 0,
+    donorCompleted: 0,
+    loading: true,
+  });
+
+  const currentUserId = currentUser?.uid;
+
+  // --- Effect Hook to Fetch Dynamic Stats ---
+  useEffect(() => {
+    if (!currentUserId) {
+      setStats(prev => ({ ...prev, loading: false }));
+      return;
+    }
+
+    const unsubscribes = [];
+
+    // --- RECEIVER STATS LOGIC ---
+    if (userRole === 'receiver') {
+      // 1. Total Available Supplies (from all donors)
+      const unsubAvailable = suppliesService.onSuppliesChange((suppliesData) => {
+        setStats(prev => ({
+          ...prev,
+          totalAvailableSupplies: suppliesData.length,
+        }));
+      });
+      unsubscribes.push(unsubAvailable);
+
+      // 2. My Requests (Total, Approved/Completed)
+      const unsubReceiverRequests = requestsService.onReceiverRequestsChange(currentUserId, (requestsData) => {
+        setStats(prev => ({
+          ...prev,
+          receiverRequests: requestsData.length,
+          receiverApproved: requestsData.filter(r => r.status === 'approved' || r.status === 'collected').length,
+          loading: false,
+        }));
+      });
+      unsubscribes.push(unsubReceiverRequests);
+    } 
+    
+    // --- DONOR STATS LOGIC ---
+    else if (userRole === 'donor') {
+      // 1. My Donations (Total)
+      const unsubDonations = suppliesService.onDonorSuppliesChange(currentUserId, (suppliesData) => {
+        setStats(prev => ({
+          ...prev,
+          donorDonations: suppliesData.length,
+        }));
+      });
+      unsubscribes.push(unsubDonations);
+
+      // 2. Requests to Me (Pending, Completed)
+      const unsubDonorRequests = requestsService.onDonorRequestsChange(currentUserId, (requestsData) => {
+        setStats(prev => ({
+          ...prev,
+          donorPendingRequests: requestsData.filter(r => r.status === 'pending').length,
+          donorCompleted: requestsData.filter(r => r.status === 'collected').length,
+          loading: false,
+        }));
+      });
+      unsubscribes.push(unsubDonorRequests);
+    } else {
+      setStats(prev => ({ ...prev, loading: false }));
+    }
+
+    // Cleanup function
+    return () => {
+      unsubscribes.forEach(unsub => unsub());
+    };
+  }, [currentUserId, userRole, currentUser]);
+
 
   const handleLogout = async () => {
     try {
@@ -14,6 +93,44 @@ export default function Dashboard() {
       console.error('Failed to log out:', error);
     }
   };
+  
+  const StatCard = ({ title, value, icon: Icon, color, onClick }) => (
+    <div 
+      onClick={onClick}
+      className={`bg-white rounded-lg shadow-md p-4 sm:p-6 border-l-4 border-${color}-500 ${onClick ? 'cursor-pointer hover:shadow-lg transition-shadow' : ''}`}
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs sm:text-sm font-medium text-gray-600">{title}</p>
+          <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">{value}</p>
+          <p className="text-xs text-gray-500 mt-1">
+             {title === 'Available Supplies' ? 'Total donations available' :
+              title === 'My Requests' ? "Items you've requested" :
+              title === 'Approved Requests' ? 'Ready for pickup or reserved' :
+              title === 'My Donations' ? "Items you've listed" :
+              title === 'Pending Requests' ? 'Awaiting your approval' :
+              title === 'Completed' ? 'Successfully donated' : 'Data is live'
+            }
+          </p>
+        </div>
+        <div className={`p-2 sm:p-3 bg-${color}-100 rounded-full`}>
+          <Icon className={`h-6 w-6 sm:h-8 sm:w-8 text-${color}-600`} />
+        </div>
+      </div>
+    </div>
+  );
+
+  if (stats.loading) {
+     return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="flex items-center gap-2 text-gray-600">
+          <Loader className="h-6 w-6 animate-spin" />
+          <span>Loading dashboard data...</span>
+        </div>
+      </div>
+    );
+  }
+
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -130,7 +247,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Dashboard Stats */}
+          {/* Dashboard Stats (DYNAMICALLY POPULATED) */}
           <div className="mb-6 sm:mb-8">
             <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">
               {userRole === 'donor' ? 'Donor Statistics' : 'Receiver Statistics'}
@@ -138,91 +255,55 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
               {userRole === 'receiver' ? (
                 <>
-                  <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 border-l-4 border-blue-500">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs sm:text-sm font-medium text-gray-600">Available Supplies</p>
-                        <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">12</p>
-                        <p className="text-xs text-gray-500 mt-1">Total donations available</p>
-                      </div>
-                      <div className="p-2 sm:p-3 bg-blue-100 rounded-full">
-                        <Package className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-                      </div>
-                    </div>
-                  </div>
+                  <StatCard 
+                    title="Available Supplies" 
+                    value={stats.totalAvailableSupplies} 
+                    icon={Package} 
+                    color="blue"
+                    onClick={() => navigate('/supplies')}
+                  />
 
-                  <div 
+                  <StatCard 
+                    title="My Requests" 
+                    value={stats.receiverRequests} 
+                    icon={ClipboardList} 
+                    color="purple"
                     onClick={() => navigate('/my-request')}
-                    className="bg-white rounded-lg shadow-md p-4 sm:p-6 border-l-4 border-purple-500 cursor-pointer hover:shadow-lg transition-shadow"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs sm:text-sm font-medium text-gray-600">My Requests</p>
-                        <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">3</p>
-                        <p className="text-xs text-gray-500 mt-1">Items I've requested</p>
-                      </div>
-                      <div className="p-2 sm:p-3 bg-purple-100 rounded-full">
-                        <ClipboardList className="h-6 w-6 sm:h-8 sm:w-8 text-purple-600" />
-                      </div>
-                    </div>
-                  </div>
+                  />
 
-                  <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 border-l-4 border-green-500">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs sm:text-sm font-medium text-gray-600">Approved Requests</p>
-                        <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">1</p>
-                        <p className="text-xs text-gray-500 mt-1">Ready for pickup</p>
-                      </div>
-                      <div className="p-2 sm:p-3 bg-green-100 rounded-full">
-                        <Users className="h-6 w-6 sm:h-8 sm:w-8 text-green-600" />
-                      </div>
-                    </div>
-                  </div>
+                  <StatCard 
+                    title="Approved Requests" 
+                    value={stats.receiverApproved} 
+                    icon={CheckCircle} 
+                    color="green"
+                    onClick={() => navigate('/my-request')}
+                  />
                 </>
               ) : (
                 <>
-                  <div 
+                  <StatCard 
+                    title="My Donations" 
+                    value={stats.donorDonations} 
+                    icon={Package} 
+                    color="green"
                     onClick={() => navigate('/my-donations')}
-                    className="bg-white rounded-lg shadow-md p-4 sm:p-6 border-l-4 border-green-500 cursor-pointer hover:shadow-lg transition-shadow"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs sm:text-sm font-medium text-gray-600">My Donations</p>
-                        <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">5</p>
-                        <p className="text-xs text-gray-500 mt-1">Items I've donated</p>
-                      </div>
-                      <div className="p-2 sm:p-3 bg-green-100 rounded-full">
-                        <Package className="h-6 w-6 sm:h-8 sm:w-8 text-green-600" />
-                      </div>
-                    </div>
-                  </div>
+                  />
 
-                  <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 border-l-4 border-yellow-500">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs sm:text-sm font-medium text-gray-600">Pending Requests</p>
-                        <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">2</p>
-                        <p className="text-xs text-gray-500 mt-1">Awaiting your approval</p>
-                      </div>
-                      <div className="p-2 sm:p-3 bg-yellow-100 rounded-full">
-                        <ClipboardList className="h-6 w-6 sm:h-8 sm:w-8 text-yellow-600" />
-                      </div>
-                    </div>
-                  </div>
+                  <StatCard 
+                    title="Pending Requests" 
+                    value={stats.donorPendingRequests} 
+                    icon={Clock} 
+                    color="yellow"
+                    onClick={() => navigate('/my-donations')}
+                  />
 
-                  <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 border-l-4 border-blue-500">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs sm:text-sm font-medium text-gray-600">Completed</p>
-                        <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">8</p>
-                        <p className="text-xs text-gray-500 mt-1">Successfully donated</p>
-                      </div>
-                      <div className="p-2 sm:p-3 bg-blue-100 rounded-full">
-                        <Users className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-                      </div>
-                    </div>
-                  </div>
+                  <StatCard 
+                    title="Completed" 
+                    value={stats.donorCompleted} 
+                    icon={Users} 
+                    color="blue"
+                    onClick={() => navigate('/my-donations')}
+                  />
                 </>
               )}
             </div>

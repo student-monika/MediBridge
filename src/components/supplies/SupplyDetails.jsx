@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { 
   AlertCircle, 
   Clock, 
@@ -8,122 +8,17 @@ import {
   Calendar, 
   MapPin, 
   User,
-  Phone,
-  Mail,
   AlertTriangle,
   Building,
   Loader
 } from 'lucide-react';
-import { suppliesService } from '../../services/firebase';
+import { useAuth } from '../../contexts/AuthContext'; 
 
-const SupplyDetails = ({ supplyId, onClose, onRequest, requestStatus, loading }) => {
-  const [supply, setSupply] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  // Fetch real-time data for this specific supply
-  useEffect(() => {
-    if (!supplyId) {
-      setIsLoading(false);
-      setError('No supply ID provided');
-      return;
-    }
-
-    let unsubscribe;
-
-    const fetchSupply = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        
-        // Set up real-time listener for all supplies and filter for this specific one
-        unsubscribe = suppliesService.onSuppliesChange((supplies) => {
-          const currentSupply = supplies.find(s => s.id === supplyId);
-          if (currentSupply) {
-            setSupply(currentSupply);
-            setError(null);
-          } else {
-            setError('Supply not found or no longer available');
-          }
-          setIsLoading(false);
-        });
-      } catch (err) {
-        console.error('Error setting up supply listener:', err);
-        setError('Failed to load supply data');
-        setIsLoading(false);
-      }
-    };
-
-    fetchSupply();
-
-    // Cleanup listener on unmount
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-    };
-  }, [supplyId]);
-
-  // Helper function to calculate days until expiry
-  const getDaysUntilExpiry = (expiryDate) => {
-    if (!expiryDate) return null;
-    const today = new Date();
-    const expiry = new Date(expiryDate);
-    const diffTime = expiry - today;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
-  };
-
-  // Helper function to format date safely
-  const formatDate = (date) => {
-    if (!date) return 'Not specified';
-    try {
-      return new Date(date).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
-    } catch (error) {
-      return 'Invalid date';
-    }
-  };
-
-  // Helper function to format date and time
-  const formatDateTime = (date) => {
-    if (!date) return 'Not specified';
-    try {
-      return new Date(date).toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    } catch (error) {
-      return 'Invalid date';
-    }
-  };
-
-  // Show loading state
-  if (isLoading) {
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-          <div className="p-6">
-            <div className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <Loader className="animate-spin h-12 w-12 text-blue-600 mx-auto mb-4" />
-                <p className="text-gray-600">Loading supply details...</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Show error state
-  if (error || !supply) {
+// Component accepts the full supply object directly from its parent
+const SupplyDetails = ({ supply, onClose, onRequest, requestStatus, loading }) => {
+  const { currentUser } = useAuth(); // Get current user
+  
+  if (!supply) {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-lg max-w-md w-full">
@@ -139,7 +34,7 @@ const SupplyDetails = ({ supplyId, onClose, onRequest, requestStatus, loading })
             </div>
             <div className="flex items-center text-red-600 mb-4">
               <AlertTriangle className="mr-2" size={20} />
-              <span>{error || 'Supply not found'}</span>
+              <span>Supply data not found</span>
             </div>
             <button
               onClick={onClose}
@@ -153,15 +48,57 @@ const SupplyDetails = ({ supplyId, onClose, onRequest, requestStatus, loading })
     );
   }
 
-  // Calculate expiry information
+  // Helper function to calculate days until expiry
+  const getDaysUntilExpiry = (expiryDate) => {
+    if (!expiryDate) return null;
+    const today = new Date();
+    const expiry = new Date(expiryDate);
+    const diffTime = expiry - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
+
+  // Helper function to format date safely (handles Date objects from service and strings)
+  const formatDate = (date) => {
+    if (!date) return 'Not specified';
+    try {
+      if (typeof date === 'object' && date.toDate) {
+        date = date.toDate();
+      }
+      return new Date(date).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    } catch (error) {
+      return 'Invalid date';
+    }
+  };
+
+  // Helper function to format date and time (handles Date objects from service and strings)
+  const formatDateTime = (date) => {
+    if (!date) return 'Not specified';
+    try {
+      if (typeof date === 'object' && date.toDate) {
+        date = date.toDate();
+      }
+      return new Date(date).toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      return 'Invalid date';
+    }
+  };
+
   const daysUntilExpiry = getDaysUntilExpiry(supply.expiryDate);
   const isUrgent = daysUntilExpiry !== null && daysUntilExpiry <= 30 && daysUntilExpiry >= 0;
   const isExpired = daysUntilExpiry !== null && daysUntilExpiry < 0;
-
-  // Get supply name (handle both 'name' and 'itemName' fields)
   const supplyName = supply.name || supply.itemName || 'Unnamed Supply';
 
-  // Get expiry status
   const getExpiryStatus = () => {
     if (daysUntilExpiry === null) return { text: 'No expiry date set', color: 'text-gray-600', bg: 'bg-gray-50' };
     if (isExpired) return { 
@@ -185,6 +122,7 @@ const SupplyDetails = ({ supplyId, onClose, onRequest, requestStatus, loading })
   };
 
   const expiryStatus = getExpiryStatus();
+  const isLoggedIn = !!currentUser;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -195,10 +133,9 @@ const SupplyDetails = ({ supplyId, onClose, onRequest, requestStatus, loading })
             <div className="flex-1">
               <div className="flex items-center gap-3 mb-2">
                 <h2 className="text-2xl font-bold text-gray-900">{supplyName}</h2>
-                {/* Real-time indicator */}
                 <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full flex items-center">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mr-1 animate-pulse"></div>
-                  Live Data
+                  <div className="w-2 h-2 bg-green-500 rounded-full mr-1"></div>
+                  Details
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-3">
@@ -236,7 +173,7 @@ const SupplyDetails = ({ supplyId, onClose, onRequest, requestStatus, loading })
           
           {/* Expiry Alert */}
           {(isUrgent || isExpired) && (
-            <div className={`${expiryStatus.bg} ${expiryStatus.border} border-l-4 p-4 mb-6 rounded-r-md`}>
+            <div className={`${expiryStatus.bg} border-l-4 p-4 mb-6 rounded-r-md border-red-200`}>
               <div className="flex">
                 {isExpired ? (
                   <AlertTriangle className="text-red-400 mr-3 flex-shrink-0" size={20} />
@@ -319,7 +256,7 @@ const SupplyDetails = ({ supplyId, onClose, onRequest, requestStatus, loading })
                   
                   <div className="flex justify-between py-2 border-b border-gray-100">
                     <span className="text-sm text-gray-600">Location</span>
-                    <span className="font-medium">{supply.location || 'Location not specified'}</span>
+                    <span className="font-medium">{supply.pickupLocation || supply.location || 'Location not specified'}</span>
                   </div>
                   
                   {supply.donorContact && (
@@ -347,7 +284,7 @@ const SupplyDetails = ({ supplyId, onClose, onRequest, requestStatus, loading })
             </div>
           </div>
           
-          {/* Description */}
+          {/* Description and Instructions remain unchanged */}
           {supply.description && (
             <div className="mb-6">
               <h3 className="font-semibold text-gray-900 mb-3">Description</h3>
@@ -357,38 +294,11 @@ const SupplyDetails = ({ supplyId, onClose, onRequest, requestStatus, loading })
             </div>
           )}
           
-          {/* Special Instructions */}
           {supply.specialInstructions && (
             <div className="mb-6">
               <h3 className="font-semibold text-gray-900 mb-3">Special Instructions</h3>
               <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded-r-md">
                 <p className="text-blue-800">{supply.specialInstructions}</p>
-              </div>
-            </div>
-          )}
-          
-          {/* Request History */}
-          {supply.requestHistory && supply.requestHistory.length > 0 && (
-            <div className="mb-6">
-              <h3 className="font-semibold text-gray-900 mb-3">Request History</h3>
-              <div className="bg-gray-50 p-4 rounded-md">
-                <div className="space-y-2">
-                  {supply.requestHistory.slice(-3).map((request, index) => (
-                    <div key={index} className="flex items-center justify-between text-sm">
-                      <span className="text-gray-600">
-                        {formatDateTime(request.date)} - {request.organization}
-                      </span>
-                      <span className={`px-2 py-1 rounded text-xs ${
-                        request.status === 'approved' ? 'bg-green-100 text-green-800' :
-                        request.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                        request.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {request.status}
-                      </span>
-                    </div>
-                  ))}
-                </div>
               </div>
             </div>
           )}
@@ -446,6 +356,13 @@ const SupplyDetails = ({ supplyId, onClose, onRequest, requestStatus, loading })
                 className="flex-1 bg-gray-200 text-gray-600 py-3 px-4 rounded-md"
               >
                 Not Available
+              </button>
+            ) : !isLoggedIn ? ( // Display if user is not logged in
+              <button
+                disabled
+                className="flex-1 bg-gray-200 text-gray-600 py-3 px-4 rounded-md"
+              >
+                Please Login to Request
               </button>
             ) : (
               <button

@@ -1,82 +1,83 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, Clock, XCircle, Loader, RefreshCw, AlertCircle } from 'lucide-react';
-import { collection, query, where, onSnapshot, doc, updateDoc, orderBy } from 'firebase/firestore';
-import { db } from '../config/firebase'; // Adjust the import path to your Firebase config
+import { CheckCircle, Clock, XCircle, Loader, AlertCircle, Mail, Phone, MapPin, ClipboardList, Package, User } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext'; 
+import { requestsService } from '../services/firebase'; 
 
 export default function MyRequestsPage() {
+  const { currentUser } = useAuth();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [donorContactMap, setDonorContactMap] = useState({}); 
+  const [activeTab, setActiveTab] = useState('all');
   
-  // Replace with actual user ID from auth context
-  // You can get this from Firebase Auth: const { currentUser } = useAuth();
-  const currentUserId = 'receiver1'; // Replace with actual user ID
+  const currentUserId = currentUser?.uid;
 
-  const fetchRequests = () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Create a query to get requests for the current user, ordered by request date (newest first)
-      const requestsQuery = query(
-        collection(db, 'requests'),
-        where('receiverId', '==', currentUserId),
-        orderBy('requestDate', 'desc')
-      );
+  // Derive receiver info for the navbar
+  const currentReceiver = currentUser ? {
+    id: currentUser.uid,
+    name: currentUser.displayName,
+    email: currentUser.email
+  } : null;
 
-      // Set up real-time listener
-      const unsubscribe = onSnapshot(
-        requestsQuery,
-        (querySnapshot) => {
-          const requestsData = [];
-          querySnapshot.forEach((doc) => {
-            requestsData.push({
-              id: doc.id,
-              ...doc.data()
-            });
-          });
-          
-          setRequests(requestsData);
-          setLoading(false);
-        },
-        (error) => {
-          console.error('Error fetching requests:', error);
-          setError('Failed to load requests. Please check your connection and try again.');
-          setLoading(false);
-        }
-      );
-
-      // Return unsubscribe function for cleanup
-      return unsubscribe;
-    } catch (err) {
-      console.error('Error setting up requests listener:', err);
-      setError('Failed to load requests. Please try again.');
-      setLoading(false);
-    }
-  };
-
-  const refreshRequests = () => {
-    // Since we're using real-time listeners, this function is no longer needed
-    // Data updates automatically from Firestore
-    console.log('Data refreshes automatically with real-time listeners');
-  };
-
+  // 1. Fetch Requests for the Receiver
   useEffect(() => {
+    if (currentUser === undefined) return; 
+
     if (!currentUserId) {
-      setError('User not authenticated');
-      setLoading(false);
-      return;
+        setError('User not authenticated. Please log in.');
+        setLoading(false);
+        return;
     }
 
-    const unsubscribe = fetchRequests();
+    setLoading(true);
+    setError(null);
+
+    const unsubscribe = requestsService.onReceiverRequestsChange(currentUserId, (requestsData) => {
+      setRequests(requestsData);
+      setLoading(false);
+    });
     
-    // Cleanup listener on component unmount
     return () => {
       if (unsubscribe && typeof unsubscribe === 'function') {
         unsubscribe();
       }
     };
-  }, [currentUserId]);
+    
+  }, [currentUserId, currentUser]);
+  
+  // 2. Fetch Donor Contact details when requests change
+  useEffect(() => {
+      const fetchDonorContacts = async () => {
+          if (requests.length === 0) return;
+          
+          const suppliesToFetch = requests
+            .filter(r => r.status === 'approved' && !donorContactMap[r.supplyId])
+            .map(r => r.supplyId);
+            
+          const newContactMap = {};
+
+          for (const supplyId of suppliesToFetch) {
+            try {
+              const supplyData = await requestsService.getSupplyById(supplyId);
+              
+              if (supplyData) {
+                newContactMap[supplyId] = {
+                    location: supplyData.pickupLocation || supplyData.location,
+                    email: supplyData.donorEmail,
+                    phone: supplyData.donorPhone 
+                };
+              }
+            } catch (err) {
+              console.error('Error fetching supply for contact:', err);
+            }
+          }
+          setDonorContactMap(prev => ({...prev, ...newContactMap}));
+      };
+
+      fetchDonorContacts();
+  }, [requests]);
+
 
   const goToDashboard = () => {
     window.location.href = '/dashboard';
@@ -89,36 +90,12 @@ export default function MyRequestsPage() {
   const cancelRequest = async (request) => {
     if (window.confirm(`Cancel request for ${request.supplyName}?`)) {
       try {
-        const requestRef = doc(db, 'requests', request.id);
-        await updateDoc(requestRef, {
-          status: 'cancelled',
-          cancelledDate: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
-        
-        // The real-time listener will automatically update the UI
-        alert(`Request for ${request.supplyName} cancelled`);
+        await requestsService.cancelRequest(request.id);
+        alert(`Request for ${request.supplyName} cancelled.`);
       } catch (error) {
         console.error('Error cancelling request:', error);
         alert('Failed to cancel request. Please try again.');
       }
-    }
-  };
-
-  const getStatusIcon = (status) => {
-    switch (status?.toLowerCase()) {
-      case 'approved':
-        return <CheckCircle className="h-5 w-5 text-green-500" />;
-      case 'pending':
-        return <Clock className="h-5 w-5 text-yellow-500" />;
-      case 'rejected':
-        return <XCircle className="h-5 w-5 text-red-500" />;
-      case 'completed':
-        return <CheckCircle className="h-5 w-5 text-blue-500" />;
-      case 'cancelled':
-        return <XCircle className="h-5 w-5 text-gray-500" />;
-      default:
-        return <Clock className="h-5 w-5 text-gray-500" />;
     }
   };
 
@@ -130,7 +107,8 @@ export default function MyRequestsPage() {
         return 'bg-yellow-100 text-yellow-800';
       case 'rejected':
         return 'bg-red-100 text-red-800';
-      case 'completed':
+      case 'collected': 
+      case 'completed': 
         return 'bg-blue-100 text-blue-800';
       case 'cancelled':
         return 'bg-gray-100 text-gray-800';
@@ -139,30 +117,13 @@ export default function MyRequestsPage() {
     }
   };
 
-  const getStatusDot = (status) => {
-    switch (status?.toLowerCase()) {
-      case 'approved':
-        return 'bg-green-500';
-      case 'pending':
-        return 'bg-yellow-500';
-      case 'rejected':
-        return 'bg-red-500';
-      case 'completed':
-        return 'bg-blue-500';
-      case 'cancelled':
-        return 'bg-gray-500';
-      default:
-        return 'bg-gray-500';
-    }
-  };
-
   const getCategoryStyle = (category) => {
     const categoryColors = {
       'Medication': 'bg-purple-100 text-purple-800',
       'PPE': 'bg-yellow-100 text-yellow-800',
       'Medical Equipment': 'bg-green-100 text-green-800',
-      'Supplies': 'bg-blue-100 text-blue-800',
-      'Emergency': 'bg-red-100 text-red-800',
+      'Surgical Supplies': 'bg-indigo-100 text-indigo-800',
+      'Diagnostic Equipment': 'bg-pink-100 text-pink-800',
       'Other': 'bg-gray-100 text-gray-800',
     };
     return categoryColors[category] || 'bg-gray-100 text-gray-800';
@@ -171,27 +132,13 @@ export default function MyRequestsPage() {
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     try {
-      // Handle Firestore Timestamp objects
       if (dateString && typeof dateString === 'object' && dateString.toDate) {
-        return dateString.toDate().toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
-        });
+        dateString = dateString.toDate();
       }
-      
-      // Handle your specific date format
-      if (dateString.includes('at') && dateString.includes('UTC')) {
-        const parts = dateString.split(' at ');
-        const datePart = parts[0];
-        return datePart;
-      }
-      
-      const dateObj = new Date(dateString);
-      return dateObj.toLocaleDateString('en-US', {
-        year: 'numeric',
+      return new Date(dateString).toLocaleDateString('en-GB', {
+        day: '2-digit',
         month: 'short',
-        day: 'numeric'
+        year: 'numeric'
       });
     } catch (err) {
       return 'Invalid Date';
@@ -201,26 +148,10 @@ export default function MyRequestsPage() {
   const formatDateTime = (dateString) => {
     if (!dateString) return 'N/A';
     try {
-      // Handle Firestore Timestamp objects
       if (dateString && typeof dateString === 'object' && dateString.toDate) {
-        return dateString.toDate().toLocaleString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        });
+        dateString = dateString.toDate();
       }
-      
-      if (dateString.includes('at') && dateString.includes('UTC')) {
-        return dateString.replace('UTC+5:30', 'IST');
-      }
-      
-      const dateObj = new Date(dateString);
-      return dateObj.toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
+      return new Date(dateString).toLocaleString('en-US', {
         hour: '2-digit',
         minute: '2-digit'
       });
@@ -229,19 +160,23 @@ export default function MyRequestsPage() {
     }
   };
 
-  const getRequestStats = () => {
-    const stats = {
-      total: requests.length,
-      pending: requests.filter(r => r.status?.toLowerCase() === 'pending').length,
-      approved: requests.filter(r => r.status?.toLowerCase() === 'approved').length,
-      completed: requests.filter(r => r.status?.toLowerCase() === 'completed').length,
-      rejected: requests.filter(r => r.status?.toLowerCase() === 'rejected').length,
-      cancelled: requests.filter(r => r.status?.toLowerCase() === 'cancelled').length,
-    };
-    return stats;
+  // Filtering and Stats Logic
+  const filteredRequests = requests.filter(req => {
+    if (activeTab === 'all') return true;
+    return req.status === activeTab;
+  });
+
+  const requestStats = {
+      all: requests.length,
+      pending: requests.filter(r => r.status === 'pending').length,
+      approved: requests.filter(r => r.status === 'approved').length,
+      rejected: requests.filter(r => r.status === 'rejected').length,
+      collected: requests.filter(r => r.status === 'collected').length || requests.filter(r => r.status === 'completed').length,
+      cancelled: requests.filter(r => r.status === 'cancelled').length,
   };
 
-  if (loading) {
+
+  if (loading || currentUser === undefined) { 
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="flex items-center gap-2 text-gray-600">
@@ -263,7 +198,7 @@ export default function MyRequestsPage() {
           <p className="text-gray-600 mb-6">{error}</p>
           <div className="flex gap-3">
             <button
-              onClick={fetchRequests}
+              onClick={() => window.location.reload()}
               className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
             >
               Try Again
@@ -280,63 +215,68 @@ export default function MyRequestsPage() {
     );
   }
 
-  const stats = getRequestStats();
-
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">My Requests</h1>
-              <p className="text-sm text-gray-600">Track your medical supply requests</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={goToDashboard}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Dashboard
-              </button>
-              <button
-                onClick={browseSupplies}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-              >
-                Browse Supplies
-              </button>
+      
+      {/* START NAVIGATION BAR */}
+      <nav className="bg-white shadow-sm border-b border-gray-200">
+        <div className="flex items-center justify-between h-16 max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="flex items-center gap-2 text-blue-600 font-semibold text-lg">
+            MediBridge
+          </div>
+          <div className="flex items-center gap-2 sm:gap-4">
+            <button 
+              onClick={goToDashboard}
+              className="text-gray-700 hover:text-blue-600 px-2 py-2 sm:px-3 rounded-md text-sm font-medium transition-colors"
+            >
+              Dashboard
+            </button>
+            <button 
+              onClick={browseSupplies} 
+              className="bg-gradient-to-r from-blue-600 to-blue-500 text-white px-3 py-2 sm:px-4 sm:py-2.5 rounded-lg font-medium hover:transform hover:-translate-y-0.5 hover:shadow-lg transition-all inline-flex items-center gap-1 sm:gap-2 text-sm"
+            >
+              <Package size={16} /> 
+              <span className="hidden sm:inline">Browse Supplies</span>
+              <span className="sm:hidden">Browse</span>
+            </button>
+            <div className="flex items-center gap-2 px-2 py-2 sm:px-3 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
+              <div className="w-8 h-8 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-medium text-sm">
+                {currentReceiver?.name ? currentReceiver.name.split(' ').map(n => n[0]).join('') : 'R'}
+              </div>
+              <span className="hidden sm:inline text-gray-700 font-medium text-sm">{currentReceiver?.name}</span>
+              <span className="text-gray-400 text-xs">▼</span>
             </div>
           </div>
         </div>
+      </nav>
+      {/* END NAVIGATION BAR */}
+
+      {/* Header Section (Title Block) */}
+      <header className="bg-white text-gray-900 py-3 border-b border-gray-200">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h1 className="text-xl sm:text-2xl font-bold mb-1">My Requests</h1>
+            <p className="text-sm text-gray-600">Track and manage your medical supply requests</p>
+        </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-8">
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
-            <div className="text-sm text-gray-600">Total</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="text-2xl font-bold text-yellow-600">{stats.pending}</div>
-            <div className="text-sm text-gray-600">Pending</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="text-2xl font-bold text-green-600">{stats.approved}</div>
-            <div className="text-sm text-gray-600">Approved</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="text-2xl font-bold text-blue-600">{stats.completed}</div>
-            <div className="text-sm text-gray-600">Completed</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="text-2xl font-bold text-red-600">{stats.rejected}</div>
-            <div className="text-sm text-gray-600">Rejected</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="text-2xl font-bold text-gray-600">{stats.cancelled}</div>
-            <div className="text-sm text-gray-600">Cancelled</div>
-          </div>
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        {/* Status Tabs */}
+        <div className="mb-6 flex flex-wrap gap-2 border-b border-gray-200">
+            {Object.entries(requestStats).map(([status, count]) => (
+                <button
+                    key={status}
+                    onClick={() => setActiveTab(status)}
+                    className={`px-4 py-2 -mb-px rounded-t-lg text-sm font-medium transition-colors flex items-center gap-2 
+                        ${activeTab === status 
+                          ? 'border-b-2 border-blue-600 text-blue-600 bg-white' 
+                          : 'text-gray-600 hover:text-gray-800'}`
+                        }
+                >
+                    <ClipboardList size={16} />
+                    {status.charAt(0).toUpperCase() + status.slice(1)} ({count})
+                </button>
+            ))}
         </div>
 
         {/* Requests List */}
@@ -354,111 +294,112 @@ export default function MyRequestsPage() {
               Browse Available Supplies
             </button>
           </div>
+        ) : filteredRequests.length === 0 ? (
+            <div className="text-center py-12 bg-white rounded-lg shadow-sm">
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">No {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Requests</h3>
+                <p className="text-gray-600">Try checking a different status tab.</p>
+            </div>
         ) : (
           <div className="space-y-4">
-            {requests.map((request) => (
+            {filteredRequests.map((request) => {
+              const status = request.status?.toLowerCase();
+              const isApproved = status === 'approved';
+              const isRejected = status === 'rejected';
+              const isClosed = status === 'collected' || status === 'cancelled';
+              const contactInfo = donorContactMap[request.supplyId]; 
+
+              let responseStyle = 'bg-gray-50 text-gray-700';
+              if (isApproved) responseStyle = 'bg-green-50 text-green-700 border-l-4 border-green-500';
+              if (isRejected) responseStyle = 'bg-red-50 text-red-700 border-l-4 border-red-500';
+              if (isClosed) responseStyle = 'bg-gray-50 text-gray-600 border-l-4 border-gray-500';
+              
+              const isActionable = status === 'pending';
+
+              return (
               <div
                 key={request.id}
-                className={`bg-white rounded-lg shadow-sm border-l-4 ${
-                  !request.isRead ? 'border-l-blue-500 bg-blue-50' : 'border-l-gray-300'
-                }`}
+                className={`bg-white rounded-lg shadow-sm p-6 ${isApproved ? 'border-green-500' : isRejected ? 'border-red-500' : 'border-gray-200'} border-l-4`}
               >
-                <div className="p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-start gap-4">
-                      <div className="flex-shrink-0">
-                        {getStatusIcon(request.status)}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <h3 className="text-lg font-semibold text-gray-900">
-                            {request.supplyName}
-                          </h3>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getCategoryStyle(request.category)}`}>
-                            {request.category}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-4 text-sm text-gray-600 mb-2">
-                          <span>From: <strong>{request.donorName}</strong></span>
-                          <span>•</span>
-                          <span>Quantity: <strong>{request.quantity} {request.unit}</strong></span>
-                          <span>•</span>
-                          <span>Location: <strong>{request.location}</strong></span>
-                        </div>
-                        <p className="text-sm text-gray-700 mb-3">{request.requestMessage}</p>
-                        
-                        {/* Response Message */}
-                        {request.responseMessage && (
-                          <div className="bg-gray-50 p-3 rounded-lg mb-3">
-                            <p className="text-sm text-gray-700">
-                              <strong>Response:</strong> {request.responseMessage}
-                            </p>
-                          </div>
-                        )}
-                        
-                        {/* Dates */}
-                        <div className="flex items-center gap-4 text-xs text-gray-500">
-                          <span>Requested: {formatDateTime(request.requestDate)}</span>
-                          {request.approvedDate && (
-                            <>
-                              <span>•</span>
-                              <span>Approved: {formatDateTime(request.approvedDate)}</span>
-                            </>
-                          )}
-                          {request.completionDate && (
-                            <>
-                              <span>•</span>
-                              <span>Completed: {formatDateTime(request.completionDate)}</span>
-                            </>
-                          )}
-                          {request.expiryDate && (
-                            <>
-                              <span>•</span>
-                              <span>Expires: {formatDate(request.expiryDate)}</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    
+                  {/* Top Header - Item Name and Category */}
+                  <div className="flex items-center justify-between border-b pb-3 mb-3 border-gray-100">
                     <div className="flex items-center gap-3">
-                      {/* Status Badge */}
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${getStatusDot(request.status)}`}></div>
-                        <span className={`px-3 py-1 rounded-full text-sm font-medium capitalize ${getStatusStyle(request.status)}`}>
-                          {request.status}
+                        <h3 className="text-lg font-semibold text-gray-900">
+                            {request.supplyName}
+                        </h3>
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getCategoryStyle(request.category)}`}>
+                            {request.category}
                         </span>
-                      </div>
-                      
-                      {/* Action Button */}
-                      {request.status?.toLowerCase() === 'pending' && (
-                        <button
-                          onClick={() => cancelRequest(request)}
-                          className="px-3 py-1 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      )}
+                    </div>
+                    {/* Status Badge */}
+                    <div className={`px-3 py-1 rounded-full text-sm font-medium capitalize ${getStatusStyle(status)}`}>
+                        {status}
                     </div>
                   </div>
-                  
-                  {/* Priority Indicator */}
-                  {request.priority && request.priority !== 'normal' && (
-                    <div className="mt-2">
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${
-                        request.priority === 'high' 
-                          ? 'bg-red-100 text-red-800' 
-                          : request.priority === 'medium'
-                          ? 'bg-orange-100 text-orange-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {request.priority} priority
-                      </span>
-                    </div>
+                
+                  {/* Main Details Block */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm text-gray-700">
+                      <p>
+                          <span className="font-medium text-gray-500">From:</span> <strong>{request.donorName}</strong>
+                      </p>
+                      <p>
+                          <span className="font-medium text-gray-500">Quantity:</span> <strong>{request.quantity} {request.unit}</strong>
+                      </p>
+                      <p>
+                          <span className="font-medium text-gray-500">Location:</span> <strong>{request.location}</strong>
+                      </p>
+                      <p>
+                          <span className="font-medium text-gray-500">Expires:</span> {formatDate(request.expiryDate)}
+                      </p>
+                      <p className="flex items-center gap-1 text-xs text-gray-500 col-span-2">
+                           <Clock size={12}/> Requested: {formatDate(request.requestDate)} {formatDateTime(request.requestDate)}
+                      </p>
+                  </div>
+
+                  {/* Donor Response Message + Contact Details */}
+                  {request.responseMessage && (
+                      <div className={`mt-4 p-4 rounded-lg ${responseStyle}`}>
+                          <p className="text-sm font-semibold mb-1">Donor Response:</p>
+                          <p className="text-sm">{request.responseMessage}</p>
+
+                          {/* Contact Details (Inserted directly below message if approved) */}
+                          {isApproved && contactInfo && (
+                              <div className="mt-3 p-3 bg-white border border-green-400 rounded-lg text-green-800">
+                                  <p className="text-sm font-semibold mb-2 flex items-center">
+                                      <CheckCircle size={16} className="mr-2"/> Pickup Contact Information
+                                  </p>
+                                  <div className="space-y-1 text-sm ml-1">
+                                      <div className="flex items-center">
+                                          <MapPin size={16} className="mr-2 flex-shrink-0" /> 
+                                          <span>Pickup Location: <strong>{contactInfo.location || 'Not Specified'}</strong></span>
+                                      </div>
+                                      <div className="flex items-center">
+                                          <Mail size={16} className="mr-2 flex-shrink-0" />
+                                          <span>Email: <strong>{contactInfo.email || 'N/A'}</strong></span>
+                                      </div>
+                                      <div className="flex items-center">
+                                          <Phone size={16} className="mr-2 flex-shrink-0" />
+                                          <span>Phone: <strong>{contactInfo.phone || 'N/A'}</strong></span>
+                                      </div>
+                                      <p className="text-xs mt-2 italic">Coordinate with the donor directly.</p>
+                                  </div>
+                              </div>
+                          )}
+                      </div>
                   )}
-                </div>
+                  
+                  {/* Cancel Button (Only visible for Pending requests) */}
+                  {isActionable && (
+                      <div className="mt-4 pt-3 border-t border-gray-100 flex justify-end">
+                          <button
+                              onClick={() => cancelRequest(request)}
+                              className="px-4 py-2 text-sm font-medium text-red-600 border border-red-300 rounded-lg hover:bg-red-50 transition-colors"
+                          >
+                              Cancel Request
+                          </button>
+                      </div>
+                  )}
               </div>
-            ))}
+            );})}
           </div>
         )}
       </div>

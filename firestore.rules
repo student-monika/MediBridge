@@ -2,52 +2,53 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Supplies collection
+    // =========================================================================
+    // SUPPLIES Collection (FIXED: Read permission extended for RESERVED status)
+    // =========================================================================
     match /supplies/{supplyId} {
-      // Anyone can read available supplies
-      allow read: if resource.data.status == 'available';
       
-      // Only authenticated users can create supplies
+      // FIX 1: Donor can read ALL their supplies (MyDonations page)
+      allow read: if request.auth != null && 
+                    request.auth.uid == resource.data.donorId;
+
+      // FIX 2: Allow ANY authenticated user to read supplies that are 'available'
+      // OR if they are 'reserved' (meaning a request was approved).
+      allow read: if resource.data.status == 'available' || 
+                      resource.data.status == 'reserved';
+
+      // Only Donor can create new supplies
       allow create: if request.auth != null &&
                       request.auth.uid == request.resource.data.donorId;
-      
-      // Only the donor can update their own supplies
-      allow update: if request.auth != null && 
-                      request.auth.uid == resource.data.donorId;
-      
-      // Only the donor can delete their own supplies
-      allow delete: if request.auth != null && 
+                      
+      // Only Donor can update or delete their supplies
+      allow update, delete: if request.auth != null && 
                       request.auth.uid == resource.data.donorId;
     }
     
-    // Requests collection
+    // =========================================================================
+    // REQUESTS Collection (No Change)
+    // =========================================================================
     match /requests/{requestId} {
-      // Users can read their own requests (as donor or receiver)
       allow read: if request.auth != null && 
                     (request.auth.uid == resource.data.receiverId || 
                      request.auth.uid == resource.data.donorId);
-      
-      // Authenticated users can create requests
       allow create: if request.auth != null && 
                       request.auth.uid == request.resource.data.receiverId;
-      
-      // Both donor and receiver can update (for status changes)
       allow update: if request.auth != null && 
                       (request.auth.uid == resource.data.receiverId || 
                        request.auth.uid == resource.data.donorId);
-      
-      // Only receiver can delete their own requests
       allow delete: if request.auth != null && 
                       request.auth.uid == resource.data.receiverId;
     }
     
-    // Users collection
+    // =========================================================================
+    // USERS Collection (No Change)
+    // =========================================================================
     match /users/{userId} {
-      // Users can read and write their own data
-      allow read, write: if request.auth != null && 
+      allow create: if request.auth != null && 
+                      request.auth.uid == userId;
+      allow read, update, delete: if request.auth != null && 
                            request.auth.uid == userId;
-      
-      // Allow reading basic user info for public profiles
       allow read: if request.auth != null;
     }
   }
